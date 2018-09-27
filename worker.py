@@ -162,6 +162,14 @@ def run():
                     print(str(e))
                     pass
 
+                ## delete the message by default
+                ## TODO: should handle the failure cases more carefully. 
+                try:
+                    azure_storage.delete_task(message)
+                except Exception as e:
+                    pass
+
+
             if len(tasks) > 0:
                 print("inference: %d images" % len(tasks))
                 time1 = time.perf_counter()
@@ -170,7 +178,7 @@ def run():
                 print("inferenced %d images with %.2f seconds" % (len(tasks),(time2-time1)))
                 for i in range(len(pred)):
                     azure_storage.put_classification_result(tasks[i]["task_id"],pred[i])
-                    azure_storage.delete_task(taken_msgs[i])
+                    #azure_storage.delete_task(taken_msgs[i])
         
         except Exception as e:
             print(str(e))
