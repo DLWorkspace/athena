@@ -61,7 +61,7 @@ from keras_applications.densenet import DenseNet
 from keras.models import load_model
 import keras.models as KM
 
-from keras_preprocessing.image import load_img,img_to_array
+from keras_preprocessing.image import img_to_array
 
 
 import itertools
@@ -100,8 +100,9 @@ except ImportError:
     pil_image = None
     ImageEnhance = None
 
+from io import BytesIO
 
-os.environ["CUDA_VISIBLE_DEVICES"]=""
+#os.environ["CUDA_VISIBLE_DEVICES"]=""
 
 if pil_image is not None:
     _PIL_INTERPOLATION_METHODS = {
@@ -122,6 +123,14 @@ if pil_image is not None:
 models = []
 batch_size = 16
 azure_storage = Azure_Storage()
+image_size = (600,450)
+dia_str = ["Melanoma",
+"Melanocytic nevus",
+"Basal cell carcinoma",
+"Actinic keratosis / Bowen’s disease (intraepithelial carcinoma)", 
+"Benign keratosis (solar lentigo / seborrheic keratosis / lichen planus-like keratosis)",
+"Dermatofibroma",
+"Vascular lesion"]
 
 
 def inference(tasks):
@@ -134,8 +143,65 @@ def inference(tasks):
     for model in models:
         results.append(model.predict(batch))
     results = np.array(results)
-    pred = np.argmax(np.average(results,axis=0),axis=1)
-    return pred
+    scores = np.average(results,axis=0)
+    pred = np.argmax(scores,axis=1)
+    return pred, scores
+
+
+def load_img(path, grayscale=False, color_mode='rgb', target_size=None,
+             interpolation='nearest'):
+    """Loads an image into PIL format.
+    # Arguments
+        path: Path to image file.
+        color_mode: One of "grayscale", "rbg", "rgba". Default: "rgb".
+            The desired image format.
+        target_size: Either `None` (default to original size)
+            or tuple of ints `(img_height, img_width)`.
+        interpolation: Interpolation method used to resample the image if the
+            target size is different from that of the loaded image.
+            Supported methods are "nearest", "bilinear", and "bicubic".
+            If PIL version 1.1.3 or newer is installed, "lanczos" is also
+            supported. If PIL version 3.4.0 or newer is installed, "box" and
+            "hamming" are also supported. By default, "nearest" is used.
+    # Returns
+        A PIL Image instance.
+    # Raises
+        ImportError: if PIL is not available.
+        ValueError: if interpolation method is not supported.
+    """
+    if grayscale is True:
+        warnings.warn('grayscale is deprecated. Please use '
+                      'color_mode = "grayscale"')
+        color_mode = 'grayscale'
+    if pil_image is None:
+        raise ImportError('Could not import PIL.Image. '
+                          'The use of `array_to_img` requires PIL.')
+    img = pil_image.open(path)
+    if color_mode == 'grayscale':
+        if img.mode != 'L':
+            img = img.convert('L')
+    elif color_mode == 'rgba':
+        if img.mode != 'RGBA':
+            img = img.convert('RGBA')
+    elif color_mode == 'rgb':
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+    else:
+        raise ValueError('color_mode must be "grayscale", "rbg", or "rgba"')
+    if target_size is not None:
+        width_height_tuple = (target_size[1], target_size[0])
+        if img.size != width_height_tuple:
+            if interpolation not in _PIL_INTERPOLATION_METHODS:
+                raise ValueError(
+                    'Invalid interpolation method {} specified. Supported '
+                    'methods are {}'.format(
+                        interpolation,
+                        ", ".join(_PIL_INTERPOLATION_METHODS.keys())))
+            resample = _PIL_INTERPOLATION_METHODS[interpolation]
+            img = img.resize(width_height_tuple, resample)
+    return img
+
+
 
 def run():
     while True:
@@ -150,11 +216,14 @@ def run():
                     print(meta)
 
                     task_id = meta["task_id"]
-                    data_shape = meta["data_shape"]
 
                     image_data = azure_storage.get_image(task_id)
-                    image_data = np.frombuffer(image_data,dtype=np.float32).reshape(data_shape)
 
+                    image_data_bytes = BytesIO(image_data)
+                    image_data = load_img(image_data_bytes, target_size = image_size)
+                    image_data = img_to_array(image_data)
+                    image_data = image_data / 255.0
+                    print(image_data.shape)
                     task = {"task_id":task_id, "image_data":image_data}
                     tasks.append(task)
                     taken_msgs.append(message)
@@ -173,31 +242,44 @@ def run():
             if len(tasks) > 0:
                 print("inference: %d images" % len(tasks))
                 time1 = time.perf_counter()
-                pred = inference(tasks)
+                pred, scores = inference(tasks)
                 time2 = time.perf_counter()
-                print("inferenced %d images with %.2f seconds" % (len(tasks),(time2-time1)))
+                print("inferenced %d images in %.2f seconds" % (len(tasks),(time2-time1)))
                 for i in range(len(pred)):
-                    azure_storage.put_classification_result(tasks[i]["task_id"],pred[i])
+
+                    result = {}
+                    result["diagnosis"] = dia_str[pred[i]]
+                    result["diagnosis_index"] = str(pred[i])
+                    result["scores"] = scores[i].tolist()
+                    result["diagnosis_report"] = "The diagnosis is '%s' (with %.2f%% confidence)" % (dia_str[pred[i]],scores[i][pred[i]]*100)
+                    print(result)
+                    azure_storage.put_classification_result(tasks[i]["task_id"],json.dumps(result))
                     #azure_storage.delete_task(taken_msgs[i])
         
         except Exception as e:
             print(str(e))
 
 def init_models():
-    model_pattern = "/home/hongzl/work/train/keras/isic_inceptionV4_batch32_split%d/final_weights_split%d.h5"
+    print("Loading models")
+    model_pattern = "/home/hongzl/densenet201-600/isic_final_split%d.h5"
     #model_pattern = "/home/hongzl/train/keras/isic_dense201_batch128_split%d/final_weights_split%d.h5"
     model_files=[]
 
     for i in range(6):
-        model_files.append(model_pattern % (i,i))
+        model_files.append(model_pattern % (i))
     for i,model_file in enumerate(model_files):
-        #with tf.device('/gpu:%d' %i):
-        with tf.device('/cpu:0'):
+        print("loading models from %s" % model_file)
+        with tf.device('/gpu:%d' %i):
+        #with tf.device('/cpu:0'):
+            model = load_model(model_file)
             #model = DenseNet([6, 12, 48, 32], True, None, None, None, None, 7)
-            model = inception_v4.create_model(num_classes=7,include_top=True)
-        model.load_weights(model_file,by_name=True)        
+            #model = inception_v4.create_model(num_classes=7,include_top=True)
+        #model.load_weights(model_file,by_name=True)        
 
         models.append(model)
+    if len(models) >0 :
+        models[0].summary()        
+    print("%d models are loaded" % len(models))
 
 
 if __name__ == '__main__':
@@ -205,3 +287,5 @@ if __name__ == '__main__':
      
     init_models()
     run()
+
+

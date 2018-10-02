@@ -32,11 +32,14 @@ class SkinLesionAnalysis(Resource):
         #params = json.dumps(params)
 
         img = base64.decodebytes(bytes(params['image'],"utf-8"))
-        img = np.frombuffer(img,dtype=np.float32).tobytes()
+        #img = np.frombuffer(img,dtype=np.float32).tobytes()
+
+
 
         task_id = str(uuid.uuid4())
-        task = {"task_id":task_id,"data_shape":params['size']}
+        task = {"task_id":task_id}
         task_msg = json.dumps(task)
+
 
         azure_storage.put_image(task_id,img)
         azure_storage.put_task(task_msg)
