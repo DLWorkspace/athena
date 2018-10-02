@@ -13,7 +13,7 @@ import requests
 
 headers = {'Content-type': 'application/json'}
 payload = {'image': imgdata.decode('utf-8'),'size':(224,224,3)}
-r = requests.post("http://airlabsgpu054.redmond.corp.microsoft.com:30161/SkinLesionAnalysis", json=payload, headers=headers)
+r = requests.post("http://regserver.westus2.cloudapp.azure.com/SkinLesionAnalysis", json=payload, headers=headers)
 print(r.text)
 
 
@@ -21,7 +21,7 @@ print(r.text)
 
 tid = json.loads(r.text)["task_id"]
 task_id = tid
-r = requests.get("http://airlabsgpu054.redmond.corp.microsoft.com:30161/SkinLesionAnalysis?task_id="+task_id)
+r = requests.get("http://regserver.westus2.cloudapp.azure.com/SkinLesionAnalysis?task_id="+task_id)
 print(r.text)
 
 ```
