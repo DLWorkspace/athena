@@ -69,16 +69,10 @@ from sklearn.metrics import *
 
 import gc
 
-
-
-
 import sys
 import json
 import os
 
-from flask import Flask
-from flask_restful import reqparse, abort, Api, Resource
-from flask import request, jsonify
 import base64
 import yaml
 
@@ -188,6 +182,13 @@ def load_img(path, grayscale=False, color_mode='rgb', target_size=None,
             img = img.convert('RGB')
     else:
         raise ValueError('color_mode must be "grayscale", "rbg", or "rgba"')
+
+
+
+    width, height = img.size
+    if width < height:
+        img = img.rotate( 90, expand=1 )
+
     if target_size is not None:
         width_height_tuple = (target_size[1], target_size[0])
         if img.size != width_height_tuple:
@@ -269,8 +270,8 @@ def init_models():
         model_files.append(model_pattern % (i))
     for i,model_file in enumerate(model_files):
         print("loading models from %s" % model_file)
-        with tf.device('/gpu:%d' %i):
-        #with tf.device('/cpu:0'):
+        #with tf.device('/gpu:%d' %i):
+        with tf.device('/cpu:0'):
             model = load_model(model_file)
             #model = DenseNet([6, 12, 48, 32], True, None, None, None, None, 7)
             #model = inception_v4.create_model(num_classes=7,include_top=True)
